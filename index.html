@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Queen's Coffee · Weighing</title>
+<!-- Only for the hosted copy (GitHub Pages etc.): the Apps Script web app URL. Leave empty inside Google. -->
+<meta name="qc-api" content="https://script.google.com/macros/s/AKfycbz8HOKav6oQDiqUP1I6a3uvh0KLov_yKobgMCEl1AvTIZNHitpVdcye-NTqj06keTP9Xg/exec">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#fa5900">
+<meta name="apple-mobile-web-app-title" content="QC Weighing">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f8f4f0; --card: #ffffff; --ink: #1f1a17; --muted: #6f655d; --line: #e4dbd1;
+    --brand: #fa5900;            /* Queen's Coffee logo orange */
+    --act: #e04e00; --act-ink: #ffffff;   /* buttons: a shade deeper so white text stays readable */
+    --sel: #2a211c; --sel-ink: #ffffff;   /* the chosen option (roaster, product, full/partial bag) */
+    --ok: #1f7a4d; --ok-bg: #e2f2e9;
+    --warn: #8a5300; --warn-bg: #fff3dc; --err: #b42318; --err-bg: #fdecea;
+    --lcd-bg: #c9d1c0; --lcd-ink: #1b2218; --chip: #efe8e0;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  .wrap { max-width: 520px; margin: 0 auto; padding: 0 16px 40px; }
+  header { position: sticky; top: 0; z-index: 5; background: #ffffff; color: var(--ink); border-bottom: 3px solid var(--brand); }
+  header .logo { width: 40px; height: 40px; flex: none; display: block; }
+  header .wrap { display: flex; align-items: center; gap: 8px; min-height: 56px; padding-bottom: 0; }
+  header h1 { flex: 1; font-size: 17px; margin: 0; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header button { background: var(--chip); border: 0; color: inherit; border-radius: 10px; padding: 8px 12px; min-height: 40px; cursor: pointer; }
+  .banner { margin: 12px 0 0; padding: 10px 12px; border-radius: 10px; background: var(--warn-bg); color: var(--warn); font-size: 14px; }
+  .banner.err { background: var(--err-bg); color: var(--err); }
+  .banner.sticky { position: sticky; top: 64px; z-index: 4; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 22px 0 8px; font-weight: 650; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 10px; cursor: pointer; }
+  .row { display: flex; align-items: baseline; gap: 8px; justify-content: space-between; }
+  .big { font-size: 20px; font-weight: 700; }
+  .muted { color: var(--muted); }
+  .small { font-size: 14px; }
+  .progress { height: 8px; background: var(--chip); border-radius: 99px; margin: 10px 0 8px; overflow: hidden; }
+  .progress i { display: block; height: 100%; background: var(--brand); border-radius: 99px; }
+  .btn { display: block; width: 100%; min-height: 52px; border-radius: 12px; border: 1px solid var(--line); background: var(--card);
+    font-size: 17px; font-weight: 600; cursor: pointer; padding: 10px 14px; text-align: center; text-decoration: none; color: var(--ink); }
+  .btn.primary, .btn.brand { background: var(--act); border-color: var(--act); color: var(--act-ink); }
+  .btn.danger { color: var(--err); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btns { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; margin-top: 10px; }
+  .empty { text-align: center; padding: 22px 12px; color: var(--muted); background: var(--card); border: 1px dashed var(--line); border-radius: 14px; }
+  label.f { display: block; margin: 16px 0 6px; font-weight: 600; }
+  input.f { width: 100%; min-height: 50px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--card); font-size: 18px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { min-height: 46px; padding: 8px 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); font-weight: 600; cursor: pointer; }
+  .chip.on { background: var(--sel); border-color: var(--sel); color: var(--sel-ink); }
+  .status { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 99px; background: var(--chip); color: var(--muted); white-space: nowrap; }
+  .status.done { background: var(--ok-bg); color: var(--ok); }
+  .line { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 48px; border-top: 1px solid var(--line); margin-top: 10px; padding-top: 8px; cursor: pointer; }
+  .nw { white-space: nowrap; }
+
+  /* weighing screen */
+  .lcd { margin-top: 14px; background: var(--lcd-bg); color: var(--lcd-ink); border-radius: 14px; padding: 8px 16px 10px;
+    border: 3px solid #4a4f57; text-align: right; }
+  .lcd .val { font: 700 56px/1.1 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+  .lcd .val small { font-size: 20px; margin-left: 4px; }
+  .lcd .val.zero { opacity: .35; }
+  .lcd .sub { display: flex; justify-content: space-between; font-size: 14px; font-weight: 600; }
+  .tare { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  .tare button { min-height: 48px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); font-weight: 600; cursor: pointer; font-size: 15px; }
+  .tare button.on { background: var(--sel); color: var(--sel-ink); border-color: var(--sel); }
+  .keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+  .keys button { min-height: 58px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); font-size: 26px; font-weight: 600; cursor: pointer; }
+  .keys button:active { background: var(--chip); }
+  .keys button.fn { font-size: 18px; color: var(--muted); }
+  .save { margin-top: 10px; min-height: 60px; font-size: 19px; }
+  .done-box { margin-top: 14px; padding: 14px; border-radius: 14px; background: var(--ok-bg); color: #14532d; }
+  .done-box b { display: block; font-size: 18px; margin-bottom: 8px; }
+  table.bags { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 14px; overflow: hidden; border: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  table.bags th, table.bags td { padding: 11px 8px; text-align: right; border-bottom: 1px solid var(--line); font-size: 15px; }
+  table.bags th { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; background: #faf7f3; }
+  table.bags td:first-child, table.bags th:first-child { text-align: center; width: 44px; }
+  table.bags td.by { color: var(--muted); font-size: 13px; text-align: left; }
+  table.bags tr.tap { cursor: pointer; }
+  table.bags tr.pending td { color: var(--muted); font-style: italic; }
+  .tag { font-size: 11px; font-weight: 700; color: var(--warn); background: var(--warn-bg); border-radius: 6px; padding: 1px 5px; margin-left: 4px; font-style: normal; }
+  .totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+  .totals div { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; }
+  .totals b { display: block; font-size: 17px; font-variant-numeric: tabular-nums; }
+  .totals span { font-size: 12px; color: var(--muted); }
+
+  /* report */
+  textarea.f { width: 100%; min-height: 110px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--card); font-size: 14px; }
+  iframe.preview { width: 100%; height: 520px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+
+  /* modal + toast */
+  .scrim { position: fixed; inset: 0; background: rgba(20,12,8,.5); display: flex; align-items: flex-end; justify-content: center; z-index: 20; }
+  .sheet { background: var(--card); width: 100%; max-width: 520px; border-radius: 18px 18px 0 0; padding: 18px 16px 22px; max-height: 92vh; overflow: auto; }
+  .sheet h3 { margin: 0 0 8px; font-size: 19px; }
+  .sheet .body { color: var(--ink); }
+  .sheet .mbtns { display: grid; gap: 10px; margin-top: 16px; grid-auto-flow: column; grid-auto-columns: 1fr; }
+  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: #1f1a17; color: #fff; padding: 12px 16px;
+    border-radius: 12px; z-index: 30; font-size: 15px; max-width: calc(100% - 32px); box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+  .check { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-weight: 600; min-height: 44px; }
+  .check input { width: 22px; height: 22px; }
+  .loading { text-align: center; color: var(--muted); padding: 60px 0; }
+  .loading img, .hello img { width: 96px; height: 96px; display: block; margin: 0 auto 14px; }
+  .hello { text-align: center; }
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <button id="back" data-a="back" hidden aria-label="Back">←</button>
+  <img class="logo" id="logo" alt="Queen's Coffee" src="data:image/png;base64,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">
+  <h1 id="title">Weighing</h1>
+  <button id="who" data-a="who"></button>
+</div></header>
+<main class="wrap" id="app"><div class="loading" id="splash">Loading…</div></main>
+<div id="layer"></div>
+
+<script>
+'use strict';
+// ------------------------------------------------------------ state
+var S = {
+  settings: null, products: [], batches: [], today: '',
+  name: load('qc_name') || '', pin: load('qc_pin') || '',
+  view: 'home', batch: null, report: null, pdf: null,
+  entry: { digits: '', partial: false, manual: false },
+  pending: loadJSON('qc_pending') || [],   // bags typed in but not yet confirmed by the server
+  nb: { roaster: '', product: '', date: '', bags: '', drums: '' },
+  offline: false, modalOpen: false,
+};
+var app = document.getElementById('app');
+var LOGO = document.getElementById('logo').src;
+document.getElementById('splash').insertAdjacentHTML('afterbegin', '<img alt="" src="' + LOGO + '">');
+
+// ------------------------------------------------------------ small helpers
+function $(sel) { return document.querySelector(sel); }
+function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function save(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function loadJSON(k) { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } }
+function savePending() { save('qc_pending', JSON.stringify(S.pending)); }
+function esc(v) { return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function kg(v) { return Number(v).toFixed(2); }
+function cents() { return parseInt(S.entry.digits || '0', 10); }
+function uuid() {
+  try { if (crypto.randomUUID) return crypto.randomUUID(); } catch (e) {}
+  return 'x' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+}
+var MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function shortDate(d) { var p = String(d).split('-'); return p.length === 3 ? Number(p[2]) + ' ' + MON[Number(p[1]) - 1] + ' ' + p[0] : d; }
+function pendingFor(id) { return S.pending.filter(function (p) { return p.batchId === id; }); }
+/** Inside Google the page talks to Code.gs through google.script.run; a hosted copy POSTs to the web app. */
+var IN_GOOGLE = !!(window.google && google.script && google.script.run);
+var QC_API = ((document.querySelector('meta[name="qc-api"]') || {}).content || '').trim();
+function api(fn) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  if (IN_GOOGLE) {
+    return new Promise(function (resolve, reject) {
+      var r = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+      r[fn].apply(r, args);
+    });
+  }
+  if (!/^(https:\/\/|http:\/\/(localhost|127\.0\.0\.1)[:/])/.test(QC_API)) {
+    return Promise.reject(new Error('QC:This page is not linked to the weighing sheet yet (the qc-api line is empty).'));
+  }
+  return fetch(QC_API, { method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                         body: JSON.stringify({ fn: fn, args: args }) })
+    .then(function (r) { return r.json(); })
+    .then(function (j) { if (!j.ok) throw new Error(j.error); return j.result; });
+}
+/** Messages we wrote for staff start with QC:. Anything else is a connection problem worth retrying. */
+function userMsg(err) {
+  var m = (err && err.message) || String(err);
+  var i = m.indexOf('QC:');
+  return i >= 0 ? m.slice(i + 3) : null;
+}
+
+var toastTimer;
+function toast(msg) {
+  var t = $('.toast');
+  if (!t) { t = document.createElement('div'); t.className = 'toast'; document.body.appendChild(t); }
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.hidden = true; }, 2600);
+}
+
+/** Bottom sheet. buttons: [{id,label,kind}] → resolves {id, values:{name:value}} */
+function modal(o) {
+  return new Promise(function (resolve) {
+    S.modalOpen = true;
+    var layer = $('#layer');
+    layer.innerHTML = '<div class="scrim"><div class="sheet" role="dialog" aria-modal="true">' +
+      '<h3>' + esc(o.title) + '</h3><div class="body">' + (o.body || '') + '</div><div class="mbtns">' +
+      (o.buttons || [{ id: 'ok', label: 'OK', kind: 'primary' }]).map(function (b) {
+        return '<button class="btn ' + (b.kind || '') + '" data-m="' + b.id + '">' + esc(b.label) + '</button>';
+      }).join('') + '</div></div></div>';
+    var first = layer.querySelector('input');
+    if (first) setTimeout(function () { first.focus(); first.select && first.select(); }, 50);
+    layer.onclick = function (e) {
+      var b = e.target.closest('[data-m]');
+      if (!b && e.target.classList.contains('scrim') && o.dismiss !== false) b = { dataset: { m: 'cancel' } };
+      if (!b) return;
+      var values = {};
+      layer.querySelectorAll('input[name]').forEach(function (i) { values[i.name] = i.type === 'checkbox' ? i.checked : i.value; });
+      layer.innerHTML = ''; layer.onclick = null; S.modalOpen = false;
+      resolve({ id: b.dataset.m, values: values });
+    };
+    layer.onkeydown = function (e) {
+      if (e.key === 'Enter') { var p = layer.querySelector('.btn.primary'); if (p) { e.preventDefault(); p.click(); } }
+    };
+  });
+}
+function alertBox(title, body) { return modal({ title: title, body: '<p>' + body + '</p>', buttons: [{ id: 'ok', label: 'OK', kind: 'primary' }] }); }
+
+// ------------------------------------------------------------ start-up
+function start() {
+  paintHeader();
+  if (!S.name) return askName().then(boot);
+  boot();
+}
+function askName() {
+  return modal({
+    title: 'Who is weighing?', dismiss: false,
+    body: '<div class="hello"><img alt="Queen\'s Coffee" src="' + LOGO + '"></div>' +
+          '<p class="muted small">Your name goes next to every bag you enter. Asked once on this phone.</p>' +
+          '<input class="f" name="name" autocomplete="name" placeholder="Your name" value="' + esc(S.name) + '">',
+    buttons: [{ id: 'ok', label: 'Continue', kind: 'primary' }],
+  }).then(function (r) {
+    var n = (r.values.name || '').trim();
+    if (!n) return askName();
+    S.name = n.slice(0, 40); save('qc_name', S.name); paintHeader();
+  });
+}
+function askPin(wrong) {
+  return modal({
+    title: 'Staff PIN', dismiss: false,
+    body: (wrong ? '<p style="color:var(--err)">That PIN is not right.</p>' : '<p class="muted small">Ask your supervisor for the PIN. Asked once on this phone.</p>') +
+          '<input class="f" name="pin" inputmode="numeric" autocomplete="off" placeholder="PIN">',
+    buttons: [{ id: 'ok', label: 'Continue', kind: 'primary' }],
+  }).then(function (r) { S.pin = (r.values.pin || '').trim(); save('qc_pin', S.pin); });
+}
+function boot(wrongPin) {
+  paintHeader();
+  return api('api_bootstrap', S.pin).then(function (r) {
+    if (!r.pinOk) return askPin(!!S.pin || wrongPin).then(function () { return boot(true); });
+    S.settings = r.settings; S.products = r.products; S.batches = r.batches; S.today = r.today;
+    render(); flushPending();
+  }, function (e) {
+    app.innerHTML = '<div class="banner err">Could not reach the weighing sheet. Check the phone has signal.<br><small>' +
+      esc(userMsg(e) || (e && e.message)) + '</small></div><div style="margin-top:12px"><button class="btn primary" data-a="reload">Try again</button></div>';
+  });
+}
+function handlePinError(e) {
+  if (userMsg(e) === 'PIN') { S.pin = ''; save('qc_pin', ''); boot(); return true; }
+  return false;
+}
+
+// ------------------------------------------------------------ routing
+function go(view, extra) {
+  S.view = view; if (extra) Object.keys(extra).forEach(function (k) { S[k] = extra[k]; });
+  render(); window.scrollTo(0, 0);
+}
+function paintHeader() {
+  $('#who').textContent = S.name ? S.name : 'Name';
+  $('#back').hidden = S.view === 'home';
+  var t = 'Weighing';
+  if (S.view === 'batch' && S.batch) t = S.batch.product;
+  if (S.view === 'new') t = 'New batch';
+  if (S.view === 'report') t = 'Report';
+  $('#title').textContent = t;
+}
+function render() {
+  paintHeader();
+  if (!S.settings) return;
+  if (S.view === 'home') renderHome();
+  else if (S.view === 'new') renderNew();
+  else if (S.view === 'batch') renderBatch();
+  else if (S.view === 'report') renderReport();
+}
+function pendingBanner() {
+  if (!S.pending.length) return '';
+  return '<div class="banner sticky' + (S.offline ? ' err' : '') + '">' + S.pending.length + ' bag' + (S.pending.length > 1 ? 's' : '') +
+    ' waiting to save' + (S.offline ? ' — no connection, retrying every few seconds. Keep this page open.' : '…') + '</div>';
+}
+
+// ------------------------------------------------------------ home
+function renderHome() {
+  var open = S.batches.filter(function (b) { return b.status === 'open'; });
+  var done = S.batches.filter(function (b) { return b.status !== 'open'; });
+  var h = pendingBanner();
+  h += '<h2>Being weighed</h2>';
+  if (!open.length) h += '<div class="empty">Nothing being weighed right now.<br>Tap <b>New batch</b> when a delivery arrives.</div>';
+  open.forEach(function (b) {
+    var n = b.count + pendingFor(b.batch_id).length;
+    var pct = Math.min(100, Math.round(100 * n / Math.max(1, b.bags_expected)));
+    h += '<div class="card" data-a="open" data-id="' + esc(b.batch_id) + '">' +
+      '<div class="row"><span class="big">' + esc(b.product) + '</span><span class="muted small">' + esc(b.roaster) + ' · ' + esc(shortDate(b.date)) + '</span></div>' +
+      '<div class="progress"><i style="width:' + pct + '%"></i></div>' +
+      '<div class="row small"><span><b>' + n + '</b> of ' + b.bags_expected + ' bags</span><span class="muted">net ' + kg(b.net) + ' kg</span></div></div>';
+  });
+  h += '<div style="margin-top:12px"><button class="btn brand" data-a="new">+ New batch</button></div>';
+  if (done.length) {
+    h += '<h2>Finished</h2>';
+    var groups = [], byKey = {};
+    done.forEach(function (b) {
+      var k = b.roaster + '|' + b.date;
+      if (!byKey[k]) { byKey[k] = { roaster: b.roaster, date: b.date, items: [] }; groups.push(byKey[k]); }
+      byKey[k].items.push(b);
+    });
+    var order = S.products.map(function (p) { return p.roaster + '|' + p.product; });
+    groups.forEach(function (g) {
+      g.items.sort(function (a, b) { return order.indexOf(a.roaster + '|' + a.product) - order.indexOf(b.roaster + '|' + b.product); });
+      h += '<div class="card" style="cursor:default"><div class="row"><span class="big">' + esc(g.roaster) + '</span><span class="muted small">' + esc(shortDate(g.date)) + '</span></div>' +
+        g.items.map(function (b) {
+          return '<div class="line" data-a="open" data-id="' + esc(b.batch_id) + '"><span><b>' + esc(b.product) + '</b> <span class="muted small">' + b.count + ' bags · ' + kg(b.net) + ' kg</span></span>' +
+                 '<span class="status done">' + (b.yield_pct == null ? 'Yield —' : 'Yield ' + b.yield_pct + '%') + '</span></div>';
+        }).join('') +
+        '<button class="btn" style="margin-top:8px" data-a="report" data-roaster="' + esc(g.roaster) + '" data-date="' + esc(g.date) + '">Report &amp; PDF</button></div>';
+    });
+  }
+  app.innerHTML = h;
+}
+
+// ------------------------------------------------------------ new batch
+function roasters() {
+  var seen = [];
+  S.products.forEach(function (p) { if (seen.indexOf(p.roaster) < 0) seen.push(p.roaster); });
+  return seen;
+}
+function renderNew() {
+  var nb = S.nb;
+  if (!nb.date) nb.date = S.today;
+  if (!nb.roaster && roasters().length === 1) nb.roaster = roasters()[0];
+  var prods = S.products.filter(function (p) { return p.roaster === nb.roaster; }).map(function (p) { return p.product; });
+  var custom = nb.product && prods.indexOf(nb.product) < 0;
+  var h = '<label class="f">Roaster</label><div class="chips">' + roasters().map(function (r) {
+    return '<button class="chip' + (nb.roaster === r ? ' on' : '') + '" data-a="nb-roaster" data-v="' + esc(r) + '">' + esc(r) + '</button>';
+  }).join('') + '</div>';
+  if (nb.roaster) {
+    h += '<label class="f">Product</label><div class="chips">' + prods.map(function (p) {
+      return '<button class="chip' + (nb.product === p ? ' on' : '') + '" data-a="nb-product" data-v="' + esc(p) + '">' + esc(p) + '</button>';
+    }).join('') + '<button class="chip' + (custom ? ' on' : '') + '" data-a="nb-other">' + (custom ? esc(nb.product) : 'Other…') + '</button></div>';
+  }
+  h += '<label class="f" for="nb-date">Delivery date (goes on the report)</label><input class="f" id="nb-date" type="date" value="' + esc(nb.date) + '">' +
+       '<label class="f" for="nb-bags">Bags (as told by the roaster)</label><input class="f" id="nb-bags" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 37" value="' + esc(nb.bags) + '">' +
+       '<label class="f" for="nb-drums">Drums</label><input class="f" id="nb-drums" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 12" value="' + esc(nb.drums) + '">' +
+       '<p class="muted small">Drums is used for the yield (' + S.settings.kg_per_drum + ' kg per drum). Leave it empty if you don\'t know yet — you can fill it in later.</p>' +
+       '<div style="margin-top:18px"><button class="btn primary" data-a="nb-create">Start weighing</button></div>';
+  app.innerHTML = h;
+  ['date', 'bags', 'drums'].forEach(function (k) {
+    $('#nb-' + k).addEventListener('input', function (e) { S.nb[k] = e.target.value.trim(); });
+  });
+}
+function createBatch() {
+  var nb = S.nb;
+  if (!nb.roaster || !nb.product) return alertBox('Almost', 'Choose the roaster and the product.');
+  var bags = parseInt(nb.bags, 10);
+  if (!(bags >= 1)) return alertBox('Almost', 'Fill in how many bags the roaster said there are.');
+  var drums = nb.drums === '' ? 0 : parseInt(nb.drums, 10);
+  if (!(drums >= 0)) return alertBox('Almost', 'Drums must be a whole number.');
+  var btn = $('[data-a="nb-create"]'); btn.disabled = true; btn.textContent = 'Saving…';
+  api('api_createBatch', S.pin, { roaster: nb.roaster, product: nb.product, date: nb.date, bags_expected: bags, drums: drums }, S.name)
+    .then(function (view) {
+      S.nb = { roaster: nb.roaster, product: '', date: '', bags: '', drums: '' };
+      upsertBatch(view); go('batch', { batch: view }); resetEntry(); render();
+    }, function (e) {
+      btn.disabled = false; btn.textContent = 'Start weighing';
+      if (!handlePinError(e)) alertBox('Not saved', esc(userMsg(e) || 'No connection. Try again.'));
+    });
+}
+
+// ------------------------------------------------------------ weighing
+function resetEntry() { S.entry = { digits: '', partial: false, manual: false }; }
+function renderBatch() {
+  var b = S.batch, s = S.settings;
+  var pend = pendingFor(b.batch_id);
+  var n = b.count + pend.length;
+  var h = pendingBanner();
+  h += '<div class="row" style="margin-top:12px"><span class="muted small">' + esc(b.roaster) + ' · <span class="nw">' + esc(shortDate(b.date)) + '</span> · <span class="nw">' + (b.drums || '?') + ' drums</span></span>' +
+       '<button class="chip" style="min-height:36px;padding:4px 12px;white-space:nowrap" data-a="details">Edit</button></div>';
+  if (b.status === 'open') {
+    if (n >= b.bags_expected) {
+      h += '<div class="done-box"><b>All ' + b.bags_expected + ' bags weighed</b>Check the list below, then finish the batch.' +
+           '<div style="margin-top:10px"><button class="btn primary" data-a="finish"' + (pend.length ? ' disabled' : '') + '>Finish batch</button></div></div>';
+    }
+    h += '<div class="lcd"><div class="sub"><span id="bagno"></span><span>kg on scale</span></div><div class="val" id="lcd"></div></div>' +
+         '<div class="tare"><button data-a="tare" data-v="full" id="t-full">Full bag −' + kg(s.tare_full_kg) + '</button>' +
+         '<button data-a="tare" data-v="partial" id="t-partial">Partial bag −' + kg(s.tare_partial_kg) + '</button></div>' +
+         '<div class="keys">' + ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'].map(function (k) {
+           return '<button data-a="key" data-v="' + k + '"' + (k === 'C' || k === '⌫' ? ' class="fn"' : '') + ' aria-label="' + (k === '⌫' ? 'Delete' : k === 'C' ? 'Clear' : k) + '">' + k + '</button>';
+         }).join('') + '</div>' +
+         '<button class="btn primary save" data-a="save" id="savebtn"></button>' +
+         '<p class="muted small" style="margin:8px 2px 0">Type the digits only — the decimal point goes in by itself (2138 → 21.38).</p>';
+  } else {
+    h += '<div class="done-box"><b>Finished · Yield ' + (b.yield_pct == null ? '—' : b.yield_pct + '%') + '</b>' +
+         'Finished by ' + esc(b.closed_by) + ' · ' + esc(b.closed_at) +
+         '<div class="btns"><button class="btn brand" data-a="report" data-roaster="' + esc(b.roaster) + '" data-date="' + esc(b.date) + '">Report</button>' +
+         '<button class="btn" data-a="reopen">Reopen</button></div></div>';
+  }
+  h += '<div class="totals"><div><span>Bags</span><b>' + n + ' / ' + b.bags_expected + '</b></div>' +
+       '<div><span>Gross kg</span><b>' + kg(b.gross + pend.reduce(function (a, p) { return a + p.gross; }, 0)) + '</b></div>' +
+       '<div><span>Net kg</span><b>' + kg(b.net + pend.reduce(function (a, p) { return a + p.gross - tareOf(p.partial); }, 0)) + '</b></div></div>';
+  h += '<h2>Bags' + (b.status === 'open' ? ' · tap one to fix it' : '') + '</h2>';
+  if (!n) h += '<div class="empty">No bags yet. Put the first bag on the scale.</div>';
+  else {
+    var rows = pend.slice().reverse().map(function (p, i) {
+      return '<tr class="pending"><td>' + (n - i) + '</td><td>' + kg(p.gross) + '</td><td>' + kg(tareOf(p.partial)) + '</td><td>' +
+             kg(p.gross - tareOf(p.partial)) + '</td><td class="by">saving…</td></tr>';
+    }).join('');
+    rows += b.bags.slice().reverse().map(function (g) {
+      return '<tr' + (b.status === 'open' ? ' class="tap" data-a="bag" data-id="' + esc(g.bag_id) + '"' : '') + '><td>' + g.no + '</td><td>' + kg(g.gross) +
+             (g.partial ? '<span class="tag">partial</span>' : '') + '</td><td>' + kg(g.tare) + '</td><td><b>' + kg(g.net) + '</b></td><td class="by">' +
+             esc(g.by) + (g.edited ? ' ✎' : '') + '</td></tr>';
+    }).join('');
+    h += '<table class="bags"><tr><th>No.</th><th>Gross</th><th>Bag</th><th>Net</th><th style="text-align:left">By</th></tr>' + rows + '</table>';
+  }
+  app.innerHTML = h;
+  if (b.status === 'open') paintEntry();
+}
+function tareOf(partial) { return partial ? S.settings.tare_partial_kg : S.settings.tare_full_kg; }
+function paintEntry() {
+  var c = cents(), e = S.entry, b = S.batch;
+  var lcd = $('#lcd'); if (!lcd) return;
+  lcd.innerHTML = (c / 100).toFixed(2);
+  lcd.className = 'val' + (c ? '' : ' zero');
+  var nextNo = b.count + pendingFor(b.batch_id).length + 1;
+  $('#bagno').textContent = 'Bag ' + nextNo + ' of ' + b.bags_expected + (c ? ' · net ' + kg(c / 100 - tareOf(e.partial)) : '');
+  $('#t-full').className = e.partial ? '' : 'on';
+  $('#t-partial').className = e.partial ? 'on' : '';
+  var sb = $('#savebtn');
+  sb.disabled = !c;
+  sb.textContent = c ? 'Save bag ' + nextNo + ' · ' + kg(c / 100) + ' kg' : 'Type the weight on the scale';
+}
+function key(k) {
+  var e = S.entry;
+  if (k === 'C') e.digits = '';
+  else if (k === '⌫') e.digits = e.digits.slice(0, -1);
+  else if (e.digits.length < 5 && !(e.digits === '' && k === '0')) e.digits += k;
+  if (!e.manual) { var c = cents(); e.partial = c > 0 && c < Math.round(S.settings.partial_below_kg * 100); }
+  if (!e.digits) e.manual = false;
+  paintEntry();
+}
+function saveBag() {
+  var c = cents(), s = S.settings, b = S.batch, e = S.entry;
+  if (!c) return;
+  var step = Math.round(s.scale_step_kg * 100);
+  if (step > 1 && c % step) {
+    return alertBox('Check the scale again', '<b>' + kg(c / 100) + ' kg</b> cannot come from this scale. It weighs in steps of ' + kg(s.scale_step_kg) +
+                    ' kg, so the last digit is always 0, 2, 4, 6 or 8.');
+  }
+  if (c > s.scale_max_kg * 100) return alertBox('Too heavy', 'The scale only goes up to ' + s.scale_max_kg + ' kg.');
+  var chain = Promise.resolve({ id: 'yes' });
+  var low = c < Math.round(s.warn_below_kg * 100), high = c > Math.round(s.warn_above_kg * 100);
+  if (!e.partial && (low || high)) {
+    chain = modal({
+      title: 'Is that right?',
+      body: '<p><b>' + kg(c / 100) + ' kg</b> is ' + (low ? 'light' : 'heavy') + ' for a full bag (usually ' + s.warn_below_kg + '–' + s.warn_above_kg +
+            ' kg). Is that what the scale shows?' + (low ? ' If this bag is not full, choose <b>Partial bag</b>.' : '') + '</p>',
+      buttons: [{ id: 'no', label: 'Re-enter' }, { id: 'yes', label: 'Yes, save it', kind: 'primary' }],
+    });
+  }
+  var nextNo = b.count + pendingFor(b.batch_id).length + 1;
+  chain.then(function (r) {
+    if (r.id !== 'yes') return;
+    if (nextNo > b.bags_expected) {
+      return modal({
+        title: 'Extra bag?',
+        body: '<p>The roaster said <b>' + b.bags_expected + '</b> bags and ' + (nextNo - 1) + ' are already weighed. Add bag ' + nextNo + ' anyway?</p>',
+        buttons: [{ id: 'no', label: 'Cancel' }, { id: 'yes', label: 'Add bag ' + nextNo, kind: 'primary' }],
+      });
+    }
+    return r;
+  }).then(function (r) {
+    if (!r || r.id !== 'yes') return;
+    S.pending.push({ batchId: b.batch_id, clientId: uuid(), gross: c / 100, partial: e.partial, who: S.name });
+    savePending(); resetEntry(); renderBatch();
+    toast('Bag ' + nextNo + ' · ' + kg(c / 100) + ' kg');
+    flushPending();
+  });
+}
+
+/** Sends typed-in bags to the Sheet one at a time, in order. A retry re-sends the same clientId, so no doubles. */
+var flushing = false, retryTimer = null;
+function flushPending() {
+  if (flushing || !S.pending.length) return;
+  flushing = true;
+  var it = S.pending[0];
+  api('api_addBag', S.pin, it.batchId, { gross: it.gross, partial: it.partial, clientId: it.clientId }, it.who).then(function (view) {
+    S.pending.shift(); savePending(); flushing = false;
+    if (S.offline) { S.offline = false; toast('Back online — saved'); }
+    onBatch(view);
+    if (S.pending.length) flushPending(); else if (S.view === 'home') render();
+  }, function (err) {
+    flushing = false;
+    var m = userMsg(err);
+    if (m === null) {                     // no connection: keep it and retry
+      if (!S.offline) { S.offline = true; render(); }
+      clearTimeout(retryTimer); retryTimer = setTimeout(flushPending, 5000);
+      return;
+    }
+    S.pending.shift(); savePending();
+    if (m === 'PIN') { S.pending.unshift(it); savePending(); handlePinError(err); return; }
+    alertBox('Bag not saved', '<b>' + kg(it.gross) + ' kg</b> — ' + esc(m)).then(function () { refreshBatch(); flushPending(); });
+  });
+}
+window.addEventListener('online', function () { clearTimeout(retryTimer); flushPending(); });
+
+function onBatch(view) {
+  upsertBatch(view);
+  if (S.view === 'batch' && S.batch && S.batch.batch_id === view.batch_id) { S.batch = view; renderBatch(); }
+}
+function upsertBatch(view) {
+  var lite = {}; Object.keys(view).forEach(function (k) { if (k !== 'bags') lite[k] = view[k]; });
+  var i = S.batches.findIndex(function (b) { return b.batch_id === view.batch_id; });
+  if (i >= 0) S.batches[i] = lite; else S.batches.unshift(lite);
+}
+function openBatch(id) {
+  var lite = S.batches.find(function (b) { return b.batch_id === id; });
+  if (lite) { S.batch = Object.assign({ bags: [] }, lite); resetEntry(); go('batch'); }
+  app.insertAdjacentHTML('afterbegin', '<div class="loading" id="ld" style="padding:8px 0">Loading bags…</div>');
+  api('api_getBatch', S.pin, id).then(function (view) { S.batch = view; upsertBatch(view); if (S.view === 'batch') renderBatch(); },
+    function (e) { if (!handlePinError(e)) alertBox('Could not load', esc(userMsg(e) || 'No connection. Try again.')); });
+}
+function refreshBatch() {
+  if (S.view !== 'batch' || !S.batch) return;
+  api('api_getBatch', S.pin, S.batch.batch_id).then(onBatch, function () {});
+}
+
+function editBag(id) {
+  var g = S.batch.bags.find(function (x) { return x.bag_id === id; });
+  if (!g) return;
+  modal({
+    title: 'Bag ' + g.no,
+    body: '<p class="muted small">Entered by ' + esc(g.by) + ' · ' + esc(g.at) + '</p>' +
+          '<label class="f">Gross weight on the scale (kg)</label><input class="f" name="gross" inputmode="decimal" value="' + kg(g.gross) + '">' +
+          '<label class="check"><input type="checkbox" name="partial"' + (g.partial ? ' checked' : '') + '> Partial bag (bag weight ' + kg(S.settings.tare_partial_kg) + ')</label>',
+    buttons: [{ id: 'del', label: 'Delete', kind: 'danger' }, { id: 'cancel', label: 'Cancel' }, { id: 'save', label: 'Save', kind: 'primary' }],
+  }).then(function (r) {
+    if (r.id === 'save') {
+      var v = String(r.values.gross || '').trim().replace(',', '.');
+      if (!/^\d{1,3}(\.\d{1,2})?$/.test(v)) return alertBox('Check the number', 'Type it like 21.38').then(function () { editBag(id); });
+      api('api_editBag', S.pin, id, { gross: Number(v), partial: !!r.values.partial }, S.name).then(function (view) { onBatch(view); toast('Bag ' + g.no + ' changed'); },
+        function (e) { if (!handlePinError(e)) alertBox('Not changed', esc(userMsg(e) || 'No connection. Try again.')); });
+    } else if (r.id === 'del') {
+      modal({ title: 'Delete bag ' + g.no + '?', body: '<p>' + kg(g.gross) + ' kg will be removed. The bags after it move up one number.</p>',
+              buttons: [{ id: 'no', label: 'Keep it' }, { id: 'yes', label: 'Delete', kind: 'primary' }] }).then(function (r2) {
+        if (r2.id !== 'yes') return;
+        api('api_deleteBag', S.pin, id, S.name).then(function (view) { onBatch(view); toast('Bag deleted'); },
+          function (e) { if (!handlePinError(e)) alertBox('Not deleted', esc(userMsg(e) || 'No connection. Try again.')); });
+      });
+    }
+  });
+}
+function editDetails() {
+  var b = S.batch;
+  modal({
+    title: b.product + ' · ' + b.roaster,
+    body: '<label class="f">Bags (as told by the roaster)</label><input class="f" name="bags" inputmode="numeric" value="' + b.bags_expected + '">' +
+          '<label class="f">Drums</label><input class="f" name="drums" inputmode="numeric" value="' + (b.drums || '') + '">' +
+          '<label class="f">Delivery date</label><input class="f" name="date" type="date" value="' + esc(b.date) + '">',
+    buttons: [{ id: 'cancel', label: 'Cancel' }, { id: 'save', label: 'Save', kind: 'primary' }],
+  }).then(function (r) {
+    if (r.id !== 'save') return;
+    var patch = { bags_expected: parseInt(r.values.bags, 10), drums: r.values.drums === '' ? 0 : parseInt(r.values.drums, 10), date: r.values.date };
+    api('api_updateBatch', S.pin, b.batch_id, patch, S.name).then(function (view) { onBatch(view); toast('Saved'); },
+      function (e) { if (!handlePinError(e)) alertBox('Not saved', esc(userMsg(e) || 'No connection. Try again.')); });
+  });
+}
+function setStatus(status) {
+  var b = S.batch;
+  var y = b.yield_pct == null ? 'no yield yet (drums missing)' : 'yield ' + b.yield_pct + '%';
+  modal({
+    title: status === 'closed' ? 'Finish ' + b.product + '?' : 'Reopen ' + b.product + '?',
+    body: status === 'closed'
+      ? '<p><b>' + b.count + ' bags</b> · net <b>' + kg(b.net) + ' kg</b> · ' + y + '.</p><p class="muted small">After finishing, bags can only be changed by reopening the batch.</p>'
+      : '<p>Staff will be able to add and change bags again.</p>',
+    buttons: [{ id: 'no', label: 'Cancel' }, { id: 'yes', label: status === 'closed' ? 'Finish' : 'Reopen', kind: 'primary' }],
+  }).then(function (r) {
+    if (r.id !== 'yes') return;
+    api('api_updateBatch', S.pin, b.batch_id, { status: status }, S.name).then(function (view) { onBatch(view); if (status === 'closed') toast('Batch finished'); },
+      function (e) { if (!handlePinError(e)) alertBox('Not saved', esc(userMsg(e) || 'No connection. Try again.')); });
+  });
+}
+
+// ------------------------------------------------------------ report
+function openReport(roaster, date) {
+  S.report = { roaster: roaster, date: date, loading: true }; S.pdf = null; S.shareBlocked = false; go('report');
+  api('api_report', S.pin, roaster, date).then(function (r) { S.report = r; if (S.view === 'report') render(); },
+    function (e) { if (!handlePinError(e)) alertBox('Could not make the report', esc(userMsg(e) || 'No connection. Try again.')); });
+}
+function renderReport() {
+  var r = S.report;
+  if (r.loading) { app.innerHTML = '<div class="loading">Making the report…</div>'; return; }
+  var h = '<p style="margin:14px 0 0"><span class="big">' + esc(r.roaster) + '</span><br><span class="muted">' + esc(r.long_date) +
+          ' · file <b>' + esc(r.filename) + '</b></span></p>';
+  r.warnings.forEach(function (w) { h += '<div class="banner">' + esc(w) + '</div>'; });
+  h += '<h2>Summary</h2>';
+  r.sections.forEach(function (x) {
+    h += '<div class="card" style="cursor:default"><div class="row"><span class="big">' + esc(x.product) + '</span><span class="status' + (x.status === 'open' ? '' : ' done') + '">' +
+         (x.status === 'open' ? 'not finished' : 'Yield ' + (x.yield_pct == null ? '—' : x.yield_pct + '%')) + '</span></div>' +
+         '<div class="small" style="margin-top:6px"><span class="nw">' + x.count + ' bags</span> · <span class="nw">' + (x.drums || '?') + ' drums</span> · <span class="nw">gross ' + kg(x.gross) + ' kg</span> · <b class="nw">net ' + kg(x.net) + ' kg</b></div></div>';
+  });
+  h += '<div style="margin-top:12px">';
+  if (!S.pdf) h += '<button class="btn primary" data-a="pdf" id="pdfbtn">Make PDF</button>';
+  else if (canAttach() && !S.shareBlocked) {
+    h += '<button class="btn primary" data-a="share" id="wabtn">Send to WhatsApp</button>' +
+         '<p class="muted small">Pick the roaster group in WhatsApp. The PDF goes as a file, with the summary.</p>';
+  } else {
+    h += '<a class="btn primary" id="wabtn" href="' + esc(waLink()) + '" target="_blank" rel="noopener">Send to WhatsApp</a>' +
+         '<p class="muted small">' + (S.shareBlocked ? 'This phone would not attach the file here, so this sends' : 'Sends') +
+         ' the summary with a link to the PDF. Pick the roaster group in WhatsApp.</p>';
+  }
+  if (S.pdf) h += '<a class="btn" style="margin-top:10px" href="' + esc(S.pdf.url) + '" target="_blank" rel="noopener">Open PDF</a>';
+  h += '</div><h2>Message for WhatsApp</h2><textarea class="f" id="watext" readonly>' + esc(r.text) + '</textarea>' +
+       '<div style="margin-top:8px"><button class="btn" data-a="copy">Copy message</button></div>' +
+       '<h2>Preview</h2><iframe class="preview" id="preview" title="Report preview"></iframe>';
+  app.innerHTML = h;
+  $('#preview').srcdoc = r.html;
+}
+function makePdf() {
+  var btn = $('#pdfbtn'); btn.disabled = true; btn.textContent = 'Making PDF…';
+  api('api_makePdf', S.pin, S.report.roaster, S.report.date, S.name).then(function (p) { S.pdf = p; render(); },
+    function (e) { btn.disabled = false; btn.textContent = 'Make PDF'; if (!handlePinError(e)) alertBox('No PDF', esc(userMsg(e) || 'No connection. Try again.')); });
+}
+/**
+ * Can this page hand the PDF file to the phone's share sheet (→ WhatsApp)? Yes on a normal web page on
+ * Android Chrome and iPhone Safari. Inside Google's Apps Script frame Chrome blocks it, so the button
+ * becomes a WhatsApp link (summary + PDF link) instead.
+ */
+function canAttach() {
+  try {
+    if (!navigator.share || !navigator.canShare) return false;
+    var probe = new File([new Uint8Array([37, 80, 68, 70])], 'probe.pdf', { type: 'application/pdf' });
+    if (!navigator.canShare({ files: [probe] })) return false;
+    var fp = document.featurePolicy;
+    if (fp && fp.features && fp.features().indexOf('web-share') >= 0 && !fp.allowsFeature('web-share')) return false;
+    return true;
+  } catch (e) { return false; }
+}
+function waLink() {
+  return 'https://wa.me/?text=' + encodeURIComponent(S.report.text + '\n\nPDF: ' + S.pdf.url);
+}
+function sharePdf() {
+  var bin = atob(S.pdf.base64), bytes = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  var file = new File([bytes], S.pdf.filename, { type: 'application/pdf' });
+  // must run straight from the tap: the share sheet needs the tap's "user activation"
+  navigator.share({ files: [file], text: S.report.text }).then(function () { toast('Sent'); }, function (e) {
+    if (e && e.name === 'AbortError') return;          // they closed the share sheet
+    S.shareBlocked = true; render();                     // fall back to the WhatsApp link
+    toast('Use the button again — it now sends a link to the PDF');
+  });
+}
+function copyText() {
+  var ta = $('#watext');
+  var done = function () { toast('Copied — paste it in WhatsApp'); };
+  (navigator.clipboard ? navigator.clipboard.writeText(ta.value) : Promise.reject()).then(done, function () {
+    ta.removeAttribute('readonly'); ta.select();
+    try { document.execCommand('copy') ? done() : toast('Long-press the text to copy it'); } catch (e) { toast('Long-press the text to copy it'); }
+    ta.setAttribute('readonly', '');
+  });
+}
+
+// ------------------------------------------------------------ events
+var actions = {
+  back: function () { if (S.view === 'report' && S.batch && S.batch.roaster === S.report.roaster && S.batch.date === S.report.date) go('batch'); else { go('home'); refreshList(); } },
+  who: function () { askName(); },
+  reload: function () { boot(); },
+  new: function () { go('new'); },
+  open: function (d) { openBatch(d.id); },
+  report: function (d, el, e) { e.stopPropagation(); openReport(d.roaster, d.date); },
+  'nb-roaster': function (d) { if (S.nb.roaster !== d.v) S.nb.product = ''; S.nb.roaster = d.v; renderNew(); },
+  'nb-product': function (d) { S.nb.product = d.v; renderNew(); },
+  'nb-other': function () {
+    modal({ title: 'Other product', body: '<input class="f" name="p" placeholder="Product code, e.g. EK20" value="">',
+            buttons: [{ id: 'cancel', label: 'Cancel' }, { id: 'ok', label: 'OK', kind: 'primary' }] })
+      .then(function (r) { if (r.id === 'ok' && r.values.p.trim()) { S.nb.product = r.values.p.trim().toUpperCase(); renderNew(); } });
+  },
+  'nb-create': createBatch,
+  key: function (d) { key(d.v); },
+  tare: function (d) { S.entry.partial = d.v === 'partial'; S.entry.manual = true; paintEntry(); },
+  save: saveBag,
+  bag: function (d) { editBag(d.id); },
+  details: editDetails,
+  finish: function () { setStatus('closed'); },
+  reopen: function () { setStatus('open'); },
+  pdf: makePdf, share: sharePdf, copy: copyText,
+};
+document.addEventListener('click', function (e) {
+  var el = e.target.closest('[data-a]');
+  if (!el || el.disabled) return;
+  var fn = actions[el.dataset.a];
+  if (fn) fn(el.dataset, el, e);
+});
+document.addEventListener('keydown', function (e) {        // a laptop keyboard works too
+  if (S.view !== 'batch' || S.modalOpen || !S.batch || S.batch.status !== 'open') return;
+  if (/^[0-9]$/.test(e.key)) key(e.key);
+  else if (e.key === 'Backspace') key('⌫');
+  else if (e.key === 'Escape') key('C');
+  else if (e.key === 'Enter') saveBag();
+});
+
+function refreshList() {
+  api('api_listBatches', S.pin).then(function (list) { S.batches = list; if (S.view === 'home' && !S.modalOpen) renderHome(); }, function () {});
+}
+// Pick up bags entered on other phones.
+setInterval(function () {
+  if (document.hidden || S.modalOpen || flushing || S.pending.length || !S.settings) return;
+  if (S.view === 'batch' && S.batch) {
+    api('api_getBatch', S.pin, S.batch.batch_id).then(function (v) {
+      var a = S.batch;
+      if (v.count !== a.count || v.net !== a.net || v.status !== a.status || v.bags_expected !== a.bags_expected || v.drums !== a.drums) onBatch(v);
+    }, function () {});
+  } else if (S.view === 'home') refreshList();
+}, 15000);
+
+start();
+</script>
+</body>
+</html>
